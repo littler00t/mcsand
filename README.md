@@ -175,3 +175,7 @@ uv run mypy src tests
 ```
 
 The package is stdlib-only (no runtime dependencies).
+
+## License
+
+[MIT](LICENSE) © 2026 Hans Hansen.
