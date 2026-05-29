@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from .paths import abspath, normalize
 
-__all__ = ["LaunchConfig", "parse_config", "parse_dir_list"]
+__all__ = ["LaunchConfig", "parse_config", "parse_dir_list", "parse_name_list"]
 
 # Values treated as "false" for CLAUDE_SANDBOX_K8S_CLUSTER_WIDE; anything else set
 # (including the empty string) counts as truthy ⇒ cluster-wide scope (v2 §9).
@@ -48,8 +48,20 @@ class LaunchConfig:
     k8s_namespace: str | None
     k8s_cluster_wide: bool | None
     k8s_token_lifetime: str | None
+    sensitive_vars: tuple[str, ...]  # user-added names, additive to the built-in default
     ssh_auth_sock: str | None
     tmpdir: str | None
+
+
+def parse_name_list(value: str | None) -> tuple[str, ...]:
+    """Parse a colon-separated list of bare names (e.g. env-var names).
+
+    Unlike :func:`parse_dir_list` these are not paths, so they are only trimmed —
+    never ``abspath``/``normalize``'d. Empty entries are dropped.
+    """
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(":") if item.strip())
 
 
 def parse_dir_list(value: str | None, *, cwd: str) -> tuple[str, ...]:
@@ -99,6 +111,7 @@ def parse_config(env: Mapping[str, str], *, cwd: str) -> LaunchConfig:
         k8s_namespace=env.get("CLAUDE_SANDBOX_K8S_NAMESPACE"),
         k8s_cluster_wide=cluster_wide,
         k8s_token_lifetime=env.get("CLAUDE_SANDBOX_K8S_TOKEN_LIFETIME"),
+        sensitive_vars=parse_name_list(env.get("CLAUDE_SANDBOX_SENSITIVE_VARS")),
         ssh_auth_sock=normalize(ssh_sock) if ssh_sock else None,
         tmpdir=env.get("TMPDIR"),
     )

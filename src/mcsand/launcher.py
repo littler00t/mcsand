@@ -16,7 +16,14 @@ import shutil
 import subprocess
 from collections.abc import Callable, Mapping
 
-__all__ = ["SANDBOX_EXEC", "build_argv", "find_claude", "launch", "require_sandbox_exec"]
+__all__ = [
+    "SANDBOX_EXEC",
+    "build_argv",
+    "find_claude",
+    "find_executable",
+    "launch",
+    "require_sandbox_exec",
+]
 
 SANDBOX_EXEC = "sandbox-exec"
 
@@ -26,9 +33,15 @@ def require_sandbox_exec() -> str | None:
     return shutil.which(SANDBOX_EXEC)
 
 
+def find_executable(name: str) -> str | None:
+    """Resolve a program to an absolute path: a bare name via ``PATH``, or an
+    explicit ``/``-containing path verified with :func:`shutil.which`."""
+    return shutil.which(name)
+
+
 def find_claude() -> str | None:
     """Discover the ``claude`` binary via ``PATH`` (§2)."""
-    return shutil.which("claude")
+    return find_executable("claude")
 
 
 def build_argv(

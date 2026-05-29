@@ -87,7 +87,7 @@ class PolicyConfig:
     workdir: str  # resolved project dir (also rw.subpaths[0]); used by the launcher
     rw: Allowlist  # §5.1 full read-write set, in emission order
     ro: Allowlist  # §5.2 read-only-in-$HOME set (subpaths + .gitconfig literal)
-    claude_read_dir: str | None = None  # resolved `claude` binary dir (v2 §5.5)
+    binary_read_dir: str | None = None  # resolved dir of the launched binary (v2 §5.5)
     ancestors: tuple[str, ...] = ()  # §5.3 file-read-metadata literals
     tamper_subpaths: tuple[str, ...] = ()  # §5.4 hook dirs
     tamper_literals: tuple[str, ...] = ()  # §5.4 settings.json (seen + symlink target)
@@ -155,8 +155,8 @@ def _read_matchers(cfg: PolicyConfig) -> list[str]:
     covered by a system root."""
     matchers: list[str] = [_subpath(p) for p in SYSTEM_READ_SUBPATHS]
     matchers += [_literal(p) for p in SYSTEM_READ_LITERALS]
-    if cfg.claude_read_dir:
-        matchers.append(_subpath(cfg.claude_read_dir))
+    if cfg.binary_read_dir:
+        matchers.append(_subpath(cfg.binary_read_dir))
 
     subpaths = [p for p in cfg.rw.subpaths if _needs_read_allow(p)] + [
         p for p in cfg.ro.subpaths if _needs_read_allow(p)

@@ -65,16 +65,19 @@ def _default_which(name: str) -> str | None:
     return shutil.which(name)
 
 
-def _resolve_claude_read_dir(
-    which: Callable[[str], str | None], resolve_link: Callable[[str], str]
+def _resolve_binary_read_dir(
+    binary: str,
+    which: Callable[[str], str | None],
+    resolve_link: Callable[[str], str],
 ) -> str | None:
-    """Resolve the directory of the ``claude`` binary for the read-allow set (v2 §5.5).
+    """Resolve the directory of the launched ``binary`` for the read-allow set (v2 §5.5).
 
-    Covers installs outside the system roots (e.g. a node version manager under
-    ``$HOME`` such as ``~/.nvm``). Returns ``None`` if ``claude`` is not found;
-    the launcher reports that separately via :func:`find_claude`.
+    Covers installs outside the system roots (e.g. ``claude`` under a node version
+    manager such as ``~/.nvm``, or a shell under ``/opt/homebrew``). ``binary`` may
+    be a bare name (resolved on ``PATH``) or an absolute path. Returns ``None`` when
+    it cannot be located; the launcher reports a missing binary separately.
     """
-    found = which("claude")
+    found = which(binary)
     if not found:
         return None
     return normalize(os.path.dirname(resolve_link(found)))
@@ -85,11 +88,17 @@ def build_policy(
     opts: OptIns,
     *,
     registry: CleanupRegistry,
+    binary: str = "claude",
     mkdtemp: Callable[[], str] = _default_mkdtemp,
     resolve_link: Callable[[str], str] = resolve1,
     which: Callable[[str], str | None] = _default_which,
 ) -> PolicyConfig:
-    """Resolve ``cfg`` + ``opts`` into a fully-canonicalized :class:`PolicyConfig`."""
+    """Resolve ``cfg`` + ``opts`` into a fully-canonicalized :class:`PolicyConfig`.
+
+    ``binary`` is the program that will run under the sandbox (default ``claude``);
+    its resolved directory is read-allowed so it stays executable under
+    deny-by-default reads. ``mcsand run``/``shell`` pass other binaries.
+    """
     home = cfg.home
 
     # --- Workdir (§2): mktemp -d when launched from $HOME, else $PWD (no remap).
@@ -149,8 +158,8 @@ def build_policy(
 
     ro = Allowlist(subpaths=tuple(ro_subpaths), literals=tuple(ro_literals))
 
-    # --- Resolve the claude binary dir for the read-allow set (v2 §5.5).
-    claude_read_dir = _resolve_claude_read_dir(which, resolve_link)
+    # --- Resolve the launched binary's dir for the read-allow set (v2 §5.5).
+    binary_read_dir = _resolve_binary_read_dir(binary, which, resolve_link)
 
     # --- Ancestor metadata (§4.4 / §6.5): the parent of $HOME (e.g. /Users) so
     # realpath walks can traverse it under deny-by-default reads (v2 §4.8), then
@@ -167,8 +176,8 @@ def build_policy(
         *(f"{home}/{s}" for s in FIXED_RO_SUFFIXES),
     ):
         add_ancestors(path, home=home, into=ancestors)
-    if claude_read_dir:
-        add_ancestors(claude_read_dir, home=home, into=ancestors)  # e.g. ~/.nvm install
+    if binary_read_dir:
+        add_ancestors(binary_read_dir, home=home, into=ancestors)  # e.g. ~/.nvm install
     if opts.docker:
         add_ancestors(opts.docker.docker_dir, home=home, into=ancestors)
     if opts.k8s:
@@ -187,7 +196,7 @@ def build_policy(
         workdir=workdir,
         rw=rw,
         ro=ro,
-        claude_read_dir=claude_read_dir,
+        binary_read_dir=binary_read_dir,
         ancestors=tuple(ancestors),
         tamper_subpaths=tuple(tamper_subpaths),
         tamper_literals=tuple(tamper_literals),

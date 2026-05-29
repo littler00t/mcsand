@@ -4,6 +4,8 @@ Env vars (§9) are the canonical configuration; the flags here are convenience
 sugar that override them. Three surfaces:
 
     mcsand [opts] [-- CLAUDE_ARGS…]   launch claude under the sandbox (default)
+    mcsand run [opts] -- CMD [ARGS…]   run an arbitrary command under the sandbox
+    mcsand shell [opts]                open $SHELL under the sandbox
     mcsand print-profile [opts]        render the SBPL profile to stdout, no launch
     mcsand doctor                      preflight checks, no launch
     mcsand install-hooks [--dry-run]   register the security hooks in settings.json
@@ -30,7 +32,7 @@ from .cleanup import CleanupRegistry
 from .config import LaunchConfig, parse_config
 from .context import build_policy
 from .environment import build_clean_env, sensitive_vars_present
-from .launcher import build_argv, find_claude, launch, require_sandbox_exec
+from .launcher import build_argv, find_claude, find_executable, launch, require_sandbox_exec
 from .optins import Ask, OptIns, YesNo, maybe_docker, maybe_k8s
 from .paths import abspath, normalize
 from .profile import render_profile
@@ -79,6 +81,14 @@ def _build_option_parser(prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--workdir", metavar="DIR", help="Override the working directory (default: $PWD)."
+    )
+    parser.add_argument(
+        "--sensitive",
+        action="append",
+        default=[],
+        metavar="VAR",
+        help="Withhold an env var unless confirmed (repeatable; additive to the "
+        "built-in default; sugar for CLAUDE_SANDBOX_SENSITIVE_VARS).",
     )
     parser.add_argument(
         "-y",
@@ -147,6 +157,7 @@ def _merge_flag_overrides(cfg: LaunchConfig, ns: argparse.Namespace, *, cwd: str
         k8s_token_lifetime=(
             ns.k8s_lifetime if ns.k8s_lifetime is not None else cfg.k8s_token_lifetime
         ),
+        sensitive_vars=cfg.sensitive_vars + tuple(ns.sensitive),
     )
 
 
@@ -310,7 +321,9 @@ def cmd_doctor(argv: list[str]) -> int:
         out.write(f"  extra RO dirs      : {', '.join(cfg.additional_ro)}\n")
     if cfg.blocked_dirs:
         out.write(f"  blocked dirs       : {', '.join(cfg.blocked_dirs)}\n")
-    present = sensitive_vars_present(env)
+    if cfg.sensitive_vars:
+        out.write(f"  sensitive (added)  : {', '.join(cfg.sensitive_vars)}\n")
+    present = sensitive_vars_present(env, cfg.sensitive_vars)
     out.write(f"  sensitive vars set : {', '.join(present) if present else '(none)'}\n")
     out.write(f"  security hooks     : {_hooks_status(cfg.claude_dir)}\n")
     return 0
@@ -331,9 +344,21 @@ def _hooks_status(claude_dir: str) -> str:
     return "installed" if "mcsand.hooks" in text else "not installed (run `mcsand install-hooks`)"
 
 
-def cmd_launch(argv: list[str]) -> int:
-    opts_args, claude_args = _split_args(argv)
-    ns, cfg, env, _ = _resolve_for_render(opts_args, prog="mcsand")
+def _sandboxed_run(
+    opts_args: list[str],
+    cmd_args: list[str],
+    *,
+    binary_name: str,
+    prog: str,
+) -> int:
+    """Shared launch pipeline: resolve config, build the profile + clean env, and
+    run ``binary_name`` with ``cmd_args`` under the sandbox (§2).
+
+    Used by ``mcsand`` (binary ``claude``), ``mcsand run`` (an arbitrary command),
+    and ``mcsand shell`` (the login shell). The only command-specific inputs are
+    the binary to resolve and its argv; everything else is identical.
+    """
+    ns, cfg, env, _ = _resolve_for_render(opts_args, prog=prog)
 
     if sys.platform != "darwin" and not ns.dry_run:
         sys.stderr.write(
@@ -343,13 +368,13 @@ def cmd_launch(argv: list[str]) -> int:
         return 2
 
     sandbox_exec = require_sandbox_exec()
-    claude_bin = find_claude()
+    binary = find_executable(binary_name)
     if not ns.dry_run:
         if not sandbox_exec:
             sys.stderr.write("mcsand: sandbox-exec not found on PATH (built into macOS).\n")
             return 2
-        if not claude_bin:
-            sys.stderr.write("mcsand: claude binary not found on PATH.\n")
+        if not binary:
+            sys.stderr.write(f"mcsand: command not found on PATH: {binary_name}\n")
             return 2
 
     registry = CleanupRegistry()
@@ -359,10 +384,10 @@ def cmd_launch(argv: list[str]) -> int:
     yes_no, ask = _make_prompts(assume_yes=ns.yes, interactive=interactive)
 
     opts = _resolve_optins(cfg, env, ns, registry, yes_no=yes_no, ask=ask)
-    policy = build_policy(cfg, opts, registry=registry)
+    policy = build_policy(cfg, opts, registry=registry, binary=binary_name)
 
     approved: set[str] = set()
-    for name in sensitive_vars_present(env):
+    for name in sensitive_vars_present(env, cfg.sensitive_vars):
         if yes_no(f"Forward sensitive variable {name} into the sandbox?"):
             approved.add(name)
 
@@ -375,24 +400,40 @@ def cmd_launch(argv: list[str]) -> int:
 
     profile_text = render_profile(policy)
     profile_path = _write_profile(profile_text, registry)
+    target = binary or binary_name
 
     if ns.dry_run:
-        argv_preview = build_argv(profile_path, clean_env, claude_bin or "claude", claude_args)
+        argv_preview = build_argv(profile_path, clean_env, target, cmd_args)
         sys.stdout.write("# mcsand --dry-run: would execute\n")
         sys.stdout.write(" ".join(argv_preview) + "\n")
         registry.run()
         return 0
 
     try:
-        return launch(
-            profile_path,
-            clean_env,
-            claude_bin or "claude",
-            claude_args,
-            workdir=policy.workdir,
-        )
+        return launch(profile_path, clean_env, target, cmd_args, workdir=policy.workdir)
     finally:
         registry.run()
+
+
+def cmd_launch(argv: list[str]) -> int:
+    opts_args, claude_args = _split_args(argv)
+    return _sandboxed_run(opts_args, claude_args, binary_name="claude", prog="mcsand")
+
+
+def cmd_run(argv: list[str]) -> int:
+    """Run an arbitrary command under the sandbox: ``mcsand run [opts] -- CMD [ARGS]``."""
+    opts_args, cmd_parts = _split_args(argv)
+    if not cmd_parts:
+        sys.stderr.write("mcsand run: no command given. Usage: mcsand run [opts] -- CMD [ARGS…]\n")
+        return 2
+    return _sandboxed_run(opts_args, cmd_parts[1:], binary_name=cmd_parts[0], prog="mcsand run")
+
+
+def cmd_shell(argv: list[str]) -> int:
+    """Open an interactive shell under the sandbox (``$SHELL``, fallback ``/bin/zsh``)."""
+    opts_args, _ = _split_args(argv)
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    return _sandboxed_run(opts_args, [], binary_name=shell, prog="mcsand shell")
 
 
 def cmd_install_hooks(argv: list[str]) -> int:
@@ -419,4 +460,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_print_profile(args[1:])
     if args and args[0] == "install-hooks":
         return cmd_install_hooks(args[1:])
+    if args and args[0] == "run":
+        return cmd_run(args[1:])
+    if args and args[0] == "shell":
+        return cmd_shell(args[1:])
     return cmd_launch(args)

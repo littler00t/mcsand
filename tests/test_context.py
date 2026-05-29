@@ -77,13 +77,13 @@ class TestClaudeBinaryDir:
         policy = build_policy(
             _cfg({"HOME": "/h"}, "/h/p"), OptIns(), registry=CleanupRegistry(), which=which
         )
-        assert policy.claude_read_dir == "/opt/homebrew/bin"
+        assert policy.binary_read_dir == "/opt/homebrew/bin"
 
     def test_none_when_not_found(self) -> None:
         policy = build_policy(
             _cfg({"HOME": "/h"}, "/h/p"), OptIns(), registry=CleanupRegistry(), which=_no_claude
         )
-        assert policy.claude_read_dir is None
+        assert policy.binary_read_dir is None
 
     def test_in_home_install_adds_ancestors(self) -> None:
         # A node-version-manager install under $HOME (e.g. ~/.nvm) contributes
@@ -94,8 +94,27 @@ class TestClaudeBinaryDir:
         policy = build_policy(
             _cfg({"HOME": "/h"}, "/h/p"), OptIns(), registry=CleanupRegistry(), which=which
         )
-        assert policy.claude_read_dir == "/h/.nvm/versions/node/v20/bin"
+        assert policy.binary_read_dir == "/h/.nvm/versions/node/v20/bin"
         assert "/h/.nvm" in policy.ancestors
+
+    def test_resolves_the_named_binary_not_always_claude(self) -> None:
+        # `mcsand run`/`shell` pass a different binary; its dir is what gets
+        # read-allowed.
+        seen: list[str] = []
+
+        def which(name: str) -> str | None:
+            seen.append(name)
+            return "/opt/homebrew/bin/fish"
+
+        policy = build_policy(
+            _cfg({"HOME": "/h"}, "/h/p"),
+            OptIns(),
+            registry=CleanupRegistry(),
+            binary="fish",
+            which=which,
+        )
+        assert seen == ["fish"]
+        assert policy.binary_read_dir == "/opt/homebrew/bin"
 
 
 class TestSymlinkInstallMode:

@@ -43,6 +43,14 @@ class TestDoctor:
         assert "sandbox-exec" in out
         assert "working directory" in out
 
+    def test_sensitive_var_from_env_reported(self, home_env, capsys, monkeypatch) -> None:
+        monkeypatch.setenv("CLAUDE_SANDBOX_SENSITIVE_VARS", "NPM_TOKEN")
+        monkeypatch.setenv("NPM_TOKEN", "t")
+        rc = main(["doctor"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "NPM_TOKEN" in out  # shown as both configured-added and set
+
 
 class TestPrintProfile:
     def test_renders_profile(self, home_env, capsys) -> None:
@@ -76,6 +84,32 @@ class TestPlatformRefusal:
         err = capsys.readouterr().err
         assert rc == 2
         assert "macOS-only" in err
+
+
+class TestRun:
+    def test_dry_run_previews_arbitrary_command(self, home_env, capsys) -> None:
+        rc = main(["run", "--no-docker", "--no-k8s", "--dry-run", "--", "echo", "hi"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "sandbox-exec" in out
+        # The resolved command + its args appear in the previewed argv.
+        assert out.rstrip().endswith("echo hi") or " echo hi" in out
+
+    def test_missing_command_errors(self, home_env, capsys) -> None:
+        rc = main(["run"])
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert "no command given" in err
+
+
+class TestShell:
+    def test_dry_run_uses_shell_env(self, home_env, capsys, monkeypatch) -> None:
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        rc = main(["shell", "--no-docker", "--no-k8s", "--dry-run"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "sandbox-exec" in out
+        assert "/bin/zsh" in out
 
 
 class TestInstallHooks:

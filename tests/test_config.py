@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcsand.config import parse_config, parse_dir_list
+from mcsand.config import parse_config, parse_dir_list, parse_name_list
 
 
 class TestParseDirList:
@@ -24,6 +24,19 @@ class TestParseDirList:
         (entry,) = parse_dir_list("./secrets", cwd="/work/proj")
         assert entry == "/work/proj/secrets"
         assert "/./" not in entry
+
+
+class TestParseNameList:
+    def test_none_and_empty(self) -> None:
+        assert parse_name_list(None) == ()
+        assert parse_name_list("") == ()
+
+    def test_colon_split_trims_and_drops_empty(self) -> None:
+        assert parse_name_list("NPM_TOKEN: AWS_SECRET ::X") == ("NPM_TOKEN", "AWS_SECRET", "X")
+
+    def test_names_are_not_path_canonicalized(self) -> None:
+        # Unlike parse_dir_list, names pass through untouched (no /private, no abspath).
+        assert parse_name_list("/tmp/x") == ("/tmp/x",)
 
 
 class TestParseConfig:
@@ -71,6 +84,17 @@ class TestParseConfig:
         assert cfg.k8s_namespace == "team-a"
         assert cfg.k8s_cluster_wide is True
         assert cfg.k8s_token_lifetime == "2h"
+
+    def test_sensitive_vars_parsed(self) -> None:
+        cfg = parse_config(
+            {"HOME": "/h", "CLAUDE_SANDBOX_SENSITIVE_VARS": "NPM_TOKEN:AWS_SECRET_ACCESS_KEY"},
+            cwd="/x",
+        )
+        assert cfg.sensitive_vars == ("NPM_TOKEN", "AWS_SECRET_ACCESS_KEY")
+
+    def test_sensitive_vars_default_empty(self) -> None:
+        cfg = parse_config({"HOME": "/h"}, cwd="/x")
+        assert cfg.sensitive_vars == ()
 
     def test_old_additional_mounts_names_ignored(self) -> None:
         # v2 hard-renamed the vars; the old names must no longer be honored.

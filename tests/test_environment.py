@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcsand.environment import build_clean_env, sensitive_vars_present
+from mcsand.environment import build_clean_env, sensitive_var_names, sensitive_vars_present
 
 
 def _build(outer, **kw):
@@ -63,3 +63,26 @@ class TestSensitiveVarsPresent:
 
     def test_empty_when_unset(self) -> None:
         assert sensitive_vars_present({"HOME": "/h"}) == []
+
+
+class TestSensitiveVarNamesAdditive:
+    def test_default_always_present(self) -> None:
+        assert sensitive_var_names() == ("ANSIBLE_VAULT_PASSWORD",)
+
+    def test_extra_is_additive_and_deduped(self) -> None:
+        names = sensitive_var_names(("NPM_TOKEN", "ANSIBLE_VAULT_PASSWORD", "NPM_TOKEN", ""))
+        # Built-in stays first; new name added once; duplicates and empties dropped.
+        assert names == ("ANSIBLE_VAULT_PASSWORD", "NPM_TOKEN")
+
+    def test_present_detects_added_var(self) -> None:
+        outer = {"HOME": "/h", "NPM_TOKEN": "t"}
+        assert sensitive_vars_present(outer, ("NPM_TOKEN",)) == ["NPM_TOKEN"]
+        # Without configuring it, an arbitrary var is not treated as sensitive.
+        assert sensitive_vars_present(outer) == []
+
+    def test_added_var_withheld_unless_approved(self) -> None:
+        outer = {"HOME": "/h", "NPM_TOKEN": "t"}
+        # Not approved → withheld even though it's in the outer env.
+        assert "NPM_TOKEN" not in _build(outer)
+        approved = _build(outer, approved_sensitive={"NPM_TOKEN"})
+        assert approved["NPM_TOKEN"] == "t"

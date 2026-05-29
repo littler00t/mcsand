@@ -8,18 +8,20 @@ returns the final dict, so the whitelist behaviour is fully unit-testable.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 __all__ = [
     "ALWAYS_DEFAULTS",
     "CONDITIONAL_VARS",
     "SENSITIVE_VARS",
     "build_clean_env",
+    "sensitive_var_names",
     "sensitive_vars_present",
 ]
 
 # Variables withheld from the sandbox unless the user confirms at startup (§7).
-# Extend by adding names here.
+# This built-in default is always withheld; users add more (additively) via
+# CLAUDE_SANDBOX_SENSITIVE_VARS / --sensitive.
 SENSITIVE_VARS: tuple[str, ...] = ("ANSIBLE_VAULT_PASSWORD",)
 
 # Always-present variables and their fallbacks when unset in the outer env (§7).
@@ -43,13 +45,28 @@ CONDITIONAL_VARS: tuple[str, ...] = (
 )
 
 
-def sensitive_vars_present(outer: Mapping[str, str]) -> list[str]:
-    """Return the sensitive variable names that are set in ``outer`` (§7).
+def sensitive_var_names(extra: Iterable[str] = ()) -> tuple[str, ...]:
+    """The effective sensitive-var list: the built-in default plus ``extra`` (§7).
 
-    Drives the per-name ``[y/N]`` withholding prompt; the prompt itself lives in
-    the CLI so this stays pure.
+    Additive by design — the built-in :data:`SENSITIVE_VARS` are always withheld;
+    user-configured names (``CLAUDE_SANDBOX_SENSITIVE_VARS`` / ``--sensitive``) only
+    extend the set. Order-preserving, deduplicated.
     """
-    return [name for name in SENSITIVE_VARS if name in outer]
+    out: list[str] = list(SENSITIVE_VARS)
+    for name in extra:
+        if name and name not in out:
+            out.append(name)
+    return tuple(out)
+
+
+def sensitive_vars_present(outer: Mapping[str, str], extra: Iterable[str] = ()) -> list[str]:
+    """Return the configured sensitive variable names that are set in ``outer`` (§7).
+
+    ``extra`` are user-added names, merged with the built-in default. Drives the
+    per-name ``[y/N]`` withholding prompt; the prompt itself lives in the CLI so
+    this stays pure.
+    """
+    return [name for name in sensitive_var_names(extra) if name in outer]
 
 
 def build_clean_env(

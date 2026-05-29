@@ -51,12 +51,28 @@ mcsand                             # same thing
 
 ```
 mcsand [opts] [-- CLAUDE_ARGS…]    # default: sandbox + launch claude
+mcsand run [opts] -- CMD [ARGS…]    # run any command under the same sandbox
+mcsand shell [opts]                 # open $SHELL under the sandbox
 mcsand print-profile [opts]         # render the SBPL profile to stdout, no launch
 mcsand doctor                       # preflight checks, no launch
 mcsand install-hooks [--dry-run]    # register the security hooks in settings.json
 ```
 
-Anything after `--` is passed straight through to `claude`:
+`run` and `shell` apply the **same** generated profile to an arbitrary program —
+the launcher isn't hardwired to `claude`. Handy for poking at the sandbox or doing
+sandboxed work in your own tools:
+
+```fish
+mcsand run -- tmux new -s work       # tmux under the sandbox
+mcsand run --rw ~/scratch -- make    # a build with an extra writable dir
+mcsand shell                         # an interactive shell (fish/zsh/…)
+```
+
+The launched binary's own directory is added to the read-allow set automatically,
+so a tool installed outside the system roots (e.g. under `~/.nvm`) stays runnable.
+
+Anything after `--` is passed straight through to the launched program (`claude` by
+default):
 
 ```fish
 mcsand -- --resume
@@ -74,6 +90,7 @@ configuration and always work. Flags override them.
 | `--ro DIR` | Add a read-only dir (repeatable). |
 | `--block DIR` | Hard-deny a dir, read **and** write (repeatable). |
 | `--workdir DIR` | Override the working directory (default `$PWD`). |
+| `--sensitive VAR` | Also withhold this env var unless confirmed (repeatable; additive). |
 | `-y`, `--yes` | Auto-accept every opt-in prompt (Docker, K8s, sensitive vars). |
 | `--no-docker` | Never offer the Docker socket. |
 | `--no-k8s` | Never mint a Kubernetes token. |
@@ -107,6 +124,7 @@ configuration and always work. Flags override them.
 | `CLAUDE_SANDBOX_K8S_CLUSTER_WIDE` | Truthy ⇒ cluster-wide `ClusterRoleBinding`. Skips the scope prompt. |
 | `CLAUDE_SANDBOX_K8S_TOKEN_LIFETIME` | Token lifetime (default `8h`). Skips the lifetime prompt and counts as opting in. |
 | `CLAUDE_SANDBOX_K8S_IMPERSONATE` | `--as=…` for the kubectl provisioning/token calls. |
+| `CLAUDE_SANDBOX_SENSITIVE_VARS` | Colon-separated env-var **names** to withhold unless confirmed (additive to the built-in `ANSIBLE_VAULT_PASSWORD`). |
 
 Relative entries are resolved against `$PWD` and canonicalized; a path already
 allowed can be re-added to widen access (last-match-wins). Reads are
@@ -136,8 +154,15 @@ silently allowing.
 
 ### Sensitive variables
 
-Named sensitive variables (currently `ANSIBLE_VAULT_PASSWORD`) are **withheld**
-from the sandbox unless you confirm at startup.
+Named sensitive variables are **withheld** from the sandbox unless you confirm
+each at startup. The built-in default is `ANSIBLE_VAULT_PASSWORD`; add more
+(additively — the default is always withheld) with `CLAUDE_SANDBOX_SENSITIVE_VARS`
+(colon-separated names) or repeated `--sensitive VAR` flags:
+
+```fish
+set -x CLAUDE_SANDBOX_SENSITIVE_VARS AWS_SECRET_ACCESS_KEY:NPM_TOKEN
+mcsand --sensitive GITHUB_TOKEN -- --resume
+```
 
 ## Development
 
