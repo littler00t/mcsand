@@ -1,0 +1,63 @@
+{
+  "name": "mcsand",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  // Node + npm via the official feature — installs AFTER the Dockerfile build,
+  // which is why claude-code / codex / ast-grep / qmd npm installs happen in
+  // post-create.sh.
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+  // host-gateway is needed on Linux for host.docker.internal; harmless on macOS/Windows.
+  // --memory / --cpus cap the container so a runaway dev build can't starve the host.
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway",
+    "--memory=8g",
+    "--cpus=4"
+  ],
+  "containerEnv": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "WATCHFILES_FORCE_POLLING": "1"
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  // Named volume keeps container claude-code creds isolated from the host ~/.claude.
+  "mounts": [
+    "source=mcsand-claude-home,target=/home/vscode/.claude,type=volume"
+  ],
+  "remoteUser": "vscode",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "fish",
+        "terminal.integrated.profiles.linux": {
+          "fish": {
+            "path": "/usr/bin/fish"
+          }
+        },
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        }
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  }
+}

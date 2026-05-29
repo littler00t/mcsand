@@ -1,0 +1,50 @@
+# --- Documentation (only README.md is tracked) ---
+doc/
+AGENTS.md
+CLAUDE.md
+TODO.md
+# stray design specs, if any reappear at the root
+macos-claude-sandbox-design*.md
+claude-hooks-design*.md
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+dist/
+build/
+
+# --- Tool caches (dot-dirs) ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+.uv/
+
+# --- qmd index / embeddings ---
+.qmd/
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Secrets (never commit) ---
+.env
+.env.*
+secrets/
